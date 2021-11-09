@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>优信 | YouChat</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+<div class="chat-box">
+    <div class="side-bar">
+        <div class="logo">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-chat-fill"
+                 viewBox="0 0 16 16">
+                <path d="M8 15c4.418 0 8-3.134 8-7s-3.582-7-8-7-8 3.134-8 7c0 1.76.743 3.37 1.97 4.6-.097 1.016-.417 2.13-.771 2.966-.079.186.074.394.273.362 2.256-.37 3.597-.938 4.18-1.234A9.06 9.06 0 0 0 8 15z"/>
+            </svg>
+            优信
+        </div>
+        <div class="groups" id="groups">
+            <div class="group-item" data-room="public">public</div>
+        </div>
+    </div>
+    <div class="main">
+        <div class="chat" id="chat"></div>
+        <div class="chat-controls" id="chat-controls">
+            <input id="message">
+            <button id="send">发送</button>
+        </div>
+    </div>
+</div>
+<script src="/jquery.min.js"></script>
+<script src="/axios.min.js"></script>
+<script>
+    const jwtToken = window.localStorage.getItem("jwtToken");
+    if (!jwtToken) {
+        window.location.replace("signin.html")
+    } else {
+        axios.get("/currentUser?token=" + jwtToken).then(res => {
+            const currentUser = res.data;
+            let currentRoom = "public";
+            const ws = new WebSocket("ws://" + location.hostname + ":" + location.port + "/chat?token=" + jwtToken);
+            ws.onmessage = msg => {
+                let data = JSON.parse(msg.data);
+                if (data.type === "EXCEPTION") {
+                    if (data.content === "身份验证失败") {
+                        window.location.replace("/signin.html")
+                    }
+                } else {
+                    processMessage(data, true)
+                }
+            };
+            ws.onclose = () => alert('WebSocket连接断开');
+
+            const messages = {public: []}
+
+            $("#send").on("click", () => sendAndClear($("#message").val()));
+            $("#message").on("keypress", (e) => {
+                if (e.code === "Enter") {
+                    sendAndClear(e.target.value);
+                }
+            });
+
+            $(document.body).on("click", '.group-item', (e) => {
+                let room = $(e.target).data("room");
+                changeRoom(room);
+            })
+
+            $(document.body).on('click', '.user', (e) => {
+                let user = $(e.target).data("user");
+                let room = roomName(currentUser.username, user);
+                if (!messages[room]) {
+                    messages[room] = [];
+                }
+                changeRoom(room);
+                updateGroup();
+            })
+
+            function changeRoom(room) {
+                $("#chat").empty();
+                currentRoom = room;
+                for (let msg of messages[currentRoom]) {
+                    processMessage(msg, false);
+                }
+            }
+
+            function roomName(user1, user2) {
+                if (user1 < user2) {
+                    return user1 + "-" + user2;
+                } else {
+                    return user2 + "-" + user1
+                }
+            }
+
+            function updateGroup() {
+                const dom = $("#groups")
+                dom.empty();
+                for (let room in messages) {
+                    let roomName = room.split("-");
+                    if (roomName[0] === currentUser.username) {
+                        roomName = roomName[1];
+                    } else {
+                        roomName = roomName[0];
+                    }
+                    dom.append(`
+                        <div class="group-item" data-room="${room}">${roomName}</div>
+                    `)
+                }
+            }
+
+            function sendAndClear(message) {
+                if (message !== "") {
+                    ws.send(JSON.stringify({
+                        type: "TEXT",
+                        content: message,
+                        to: currentRoom
+                    }));
+                    $("#message").val("");
+                }
+            }
+
+            /**
+             * 处理消息
+             * @param data 消息
+             * @param store 是否储存在内存
+             */
+            function processMessage(data, store) {
+                if (store) {
+                    if (messages[data.to]) {
+                        messages[data.to].push(data);
+                    } else {
+                        messages[data.to] = [];
+                        messages[data.to].push(data);
+                        updateGroup();
+                    }
+                }
+                if (data.to !== currentRoom) {
+                    return;
+                }
+                if (data.from === "[Server]") {
+                    $("#chat").append(`
+                            <div class="server">${data.content}</div>
+                        `);
+                } else {
+                    let clazz = data.from === currentUser.username ? "message me" : "message";
+                    $("#chat").append(`
+                        <div class="${clazz}">
+                            <div class="user" data-user="${data.from}">${data.from}</div>
+                            <div class="body">${data.content}</div>
+                        </div>
+                    `);
+                }
+
+            }
+        }).catch(_ => {
+            window.location.replace("signin.html")
+        });
+    }
+</script>
+</body>
+</html>
